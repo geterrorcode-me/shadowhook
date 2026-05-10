@@ -18,28 +18,47 @@ jobs:
 
       - name: Install Android NDK and CMake
         run: |
+          # Install NDK r25b dan CMake 3.22
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.1.8937393" "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393" >> $GITHUB_ENV
 
-      - name: Patch for Build Stability
+      - name: Patch Project Files (Brute Force Sync)
         run: |
-          # Buat local.properties secara manual untuk mengunci path
+          # 1. Paksa semua build.gradle menggunakan NDK 25.1.8937393
+          # Ini memperbaiki error CXX1104 (disagreement version)
+          find . -name "build.gradle" -exec sed -i 's/ndkVersion [^ ]*/ndkVersion "25.1.8937393"/g' {} +
+          
+          # 2. Turunkan syarat CMake minimum ke 3.10.2 untuk semua CMakeLists.txt
+          # Ini memperbaiki error CXX1300 (CMake 4.0.3 not found)
+          find . -name "CMakeLists.txt" -exec sed -i 's/cmake_minimum_required(VERSION [0-9.]*)/cmake_minimum_required(VERSION 3.10.2)/g' {} +
+          
+          # 3. Hapus baris versi cmake yang spesifik di build.gradle jika ada
+          find . -name "build.gradle" -exec sed -i 's/version "4.0.3"/version "3.22.1"/g' {} +
+
+          # 4. Buat local.properties untuk mengunci jalur SDK/NDK/CMake
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "ndk.dir=$ANDROID_HOME/ndk/25.1.8937393" >> local.properties
           echo "cmake.dir=$ANDROID_HOME/cmake/3.22.1" >> local.properties
+          
           chmod +x gradlew
 
       - name: Build ShadowHook Release
         run: |
+          # Jalankan build hanya untuk modul shadowhook
           ./gradlew :shadowhook:assembleRelease \
             -Pandroid.ndkVersion=25.1.8937393 \
-            --stacktrace
+            -Dorg.gradle.project.android.externalNativeBuild.cmake.version=3.22.1 \
+            --stacktrace --info
 
       - name: Organize Artifacts
         run: |
           mkdir -p final_libs/arm64-v8a
           mkdir -p final_libs/include
+          
+          # Ambil .so hasil compile untuk arm64
           find shadowhook/build/intermediates/cmake/release -name "libshadowhook.so" | grep "arm64-v8a" | xargs -I{} cp {} final_libs/arm64-v8a/
+          
+          # Ambil header file untuk keperluan JNI vMeer
           cp shadowhook/src/main/cpp/shadowhook.h final_libs/include/
 
       - name: Upload Binaries
@@ -47,3 +66,4 @@ jobs:
         with:
           name: shadowhook-binaries
           path: final_libs/
+          retention-days: 7
