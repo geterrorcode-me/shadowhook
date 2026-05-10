@@ -1,7 +1,7 @@
 name: Build ShadowHook Binaries
 
 on:
-  workflow_dispatch: # Memungkinkan tombol 'Run workflow' manual di tab Actions
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,46 +14,36 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'temurin' # Nama yang benar (bukan terminurin)
+          distribution: 'temurin'
 
       - name: Install Android NDK and CMake
         run: |
-          # Install NDK r25b (Sangat stabil untuk library hooking)
-          # Dan CMake 3.22.1 untuk menghindari error CXX1300
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.1.8937393" "cmake;3.22.1"
-          
-          # Set environment variables agar Gradle mendeteksi lokasi NDK
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393" >> $GITHUB_ENV
 
-      - name: Grant Execute Permission for Gradle
-        run: chmod +x gradlew
+      - name: Patch for Build Stability
+        run: |
+          # Buat local.properties secara manual untuk mengunci path
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "ndk.dir=$ANDROID_HOME/ndk/25.1.8937393" >> local.properties
+          echo "cmake.dir=$ANDROID_HOME/cmake/3.22.1" >> local.properties
+          chmod +x gradlew
 
       - name: Build ShadowHook Release
         run: |
-          # Kita paksa Gradle menggunakan CMake 3.22.1 yang baru saja diinstall
           ./gradlew :shadowhook:assembleRelease \
-            -Dorg.gradle.project.android.externalNativeBuild.cmake.version=3.22.1 \
-            -Pandroid.ndkVersion=25.1.8937393
+            -Pandroid.ndkVersion=25.1.8937393 \
+            --stacktrace
 
       - name: Organize Artifacts
         run: |
-          # Buat struktur folder hasil yang rapi
           mkdir -p final_libs/arm64-v8a
           mkdir -p final_libs/include
-          
-          # 1. Ambil binary .so khusus untuk arm64-v8a (Prioritas vMeer)
           find shadowhook/build/intermediates/cmake/release -name "libshadowhook.so" | grep "arm64-v8a" | xargs -I{} cp {} final_libs/arm64-v8a/
-          
-          # 2. Ambil header file shadowhook.h
           cp shadowhook/src/main/cpp/shadowhook.h final_libs/include/
-          
-          # 3. (Opsional) Ambil ABI lain jika Anda butuh untuk emulator (x86_64)
-          mkdir -p final_libs/x86_64
-          find shadowhook/build/intermediates/cmake/release -name "libshadowhook.so" | grep "x86_64" | xargs -I{} cp {} final_libs/x86_64/ || true
 
       - name: Upload Binaries
         uses: actions/upload-artifact@v4
         with:
           name: shadowhook-binaries
           path: final_libs/
-          retention-days: 7
