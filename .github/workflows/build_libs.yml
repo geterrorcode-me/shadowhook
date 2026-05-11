@@ -24,29 +24,40 @@ jobs:
 
       - name: Install Android Components
         run: |
-          # Install CMake 3.22.1 (Versi stabil yang didukung Android)
+          # Install NDK & Build Tools yang diperlukan
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            "cmake;3.22.1" \
-            "ndk;25.2.9519653"
+            "ndk;25.2.9519653" \
+            "platforms;android-33" \
+            "build-tools;33.0.2"
 
-      - name: Fix CMake Version in Gradle Files
-        # Langkah krusial: Mencari string '4.0.3' dan menggantinya ke '3.22.1' 
-        # di semua file build.gradle agar tidak terjadi error CXX1300.
+      - name: Install Latest CMake (v3.30.5+)
+        # Kita mendownload binari resmi CMake karena sdkmanager tidak punya versi 3.30+
         run: |
-          find . -name "build.gradle" -exec sed -i 's/"4.0.3"/"3.22.1"/g' {} +
-          find . -name "build.gradle" -exec sed -i "s/'4.0.3'/'3.22.1'/g" {} +
+          CMAKE_VERSION=3.30.5
+          wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.sh
+          sudo sh cmake-${CMAKE_VERSION}-linux-x86_64.sh --skip-license --prefix=/usr/local
+          # Verifikasi versi
+          cmake --version
+
+      - name: Fix CMake Version Reference in Gradle
+        # Memastikan Gradle tidak memaksa versi 4.0.3 yang tidak ada, 
+        # melainkan menggunakan versi yang baru kita instal di atas.
+        run: |
+          find . -name "build.gradle" -exec sed -i 's/"4.0.3"/"3.30.5"/g' {} +
+          find . -name "build.gradle" -exec sed -i "s/'4.0.3'/'3.30.5'/g" {} +
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build Shadowhook
         run: |
+          # Kita gunakan -Pandroid.cmake_dir untuk memberi tahu Gradle lokasi CMake manual kita
           ./gradlew :shadowhook:assembleRelease \
             -PbuildToolsVersion="33.0.2" \
             -PcompileSdkVersion=33 \
             -PminSdkVersion=16 \
             -PtargetSdkVersion=33 \
-            -Pandroid.cmakeVersion="3.22.1"
+            -Pandroid.cmakeVersion="3.30.5"
 
       - name: Upload SO Libraries
         uses: actions/upload-artifact@v4
