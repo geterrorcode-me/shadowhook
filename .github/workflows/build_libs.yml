@@ -18,13 +18,13 @@ jobs:
 
       - name: Install Android NDK and CMake
         run: |
-          # Install NDK r25b dan CMake 3.22.1
+          # Paksa install NDK 25 dan CMake 3.22 yang stabil
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.1.8937393" "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393" >> $GITHUB_ENV
 
-      - name: Patch Project (Brute Force Overwrite)
+      - name: Patch Project (ShadowHook Overwrite)
         run: |
-          # 1. Timpa build.gradle root untuk menggunakan repositori & AGP stabil
+          # 1. Timpa build.gradle root agar tidak mencari plugin 8.10.1 yang error di log Anda
           cat <<EOF > build.gradle
           buildscript {
               repositories {
@@ -43,18 +43,16 @@ jobs:
           }
           EOF
 
-          # 2. Modifikasi settings.gradle: HANYA modul library
+          # 2. Pastikan settings.gradle hanya fokus pada modul shadowhook
           echo "include ':shadowhook'" > settings.gradle
 
-          # 3. Patch build.gradle di dalam folder shadowhook
-          # Mengatur agar tidak ada konflik versi NDK
+          # 3. Patch ndkVersion di dalam modul agar sinkron dengan NDK yang kita install
           find shadowhook -name "build.gradle" -exec sed -i 's/ndkVersion [^ ]*/ndkVersion "25.1.8937393"/g' {} +
           
-          # 4. Patch CMakeLists.txt: Turunkan syarat versi minimum
+          # 4. Turunkan syarat versi CMake agar tidak mencari versi 4.0.3
           find shadowhook -name "CMakeLists.txt" -exec sed -i 's/cmake_minimum_required(VERSION [0-9.]*)/cmake_minimum_required(VERSION 3.10.2)/g' {} +
-          
-          # 5. Lock jalur SDK/NDK/CMake di local.properties
-          # Menggunakan backslash (\$) agar shell tidak mengevaluasi variabel sebelum ditulis ke file
+
+          # 5. Lock jalur SDK/NDK/CMake agar Gradle tidak bingung
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "ndk.dir=$ANDROID_HOME/ndk/25.1.8937393" >> local.properties
           echo "cmake.dir=$ANDROID_HOME/cmake/3.22.1" >> local.properties
@@ -63,18 +61,18 @@ jobs:
 
       - name: Build ShadowHook Library
         run: |
-          # Jalankan assembleRelease hanya untuk modul :shadowhook
+          # Jalankan assembleRelease khusus untuk modul shadowhook
           ./gradlew :shadowhook:assembleRelease \
             -Pandroid.ndkVersion=25.1.8937393 \
             -Dorg.gradle.project.android.externalNativeBuild.cmake.version=3.22.1 \
-            --no-daemon --stacktrace --info
+            --no-daemon --stacktrace
 
       - name: Organize Artifacts
         run: |
           mkdir -p final_libs/arm64-v8a
           mkdir -p final_libs/include
           
-          # Ambil .so hasil kompilasi
+          # Ambil .so untuk arsitektur 64-bit
           find shadowhook/build/intermediates/cmake/release -name "libshadowhook.so" | grep "arm64-v8a" | xargs -I{} cp {} final_libs/arm64-v8a/
           
           # Ambil header file shadowhook.h
