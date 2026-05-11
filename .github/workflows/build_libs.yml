@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Penting jika shadowhook menggunakan submodule
+          submodules: recursive
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -24,26 +24,29 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v3
-
-      # Langkah ini untuk memastikan NDK tersedia karena Shadowhook adalah library C/C++
-      - name: Install NDK
+      - name: Install Android SDK & NDK
+        # Kita menginstal CMake dan NDK yang dibutuhkan
         run: |
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;25.2.9519653" \
+            "cmake;3.22.1" \
+            "build-tools;33.0.2" \
+            "platforms;android-33"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build with Gradle
-        # Kita menyuntikkan properti yang hilang melalui flag -P
-        # Sesuaikan versi di bawah ini dengan kebutuhan proyek Anda
+        # Catatan: Kita memaksa Gradle menggunakan CMake 3.22.1 
+        # karena 4.0.3 kemungkinan besar adalah typo di build script atau versi yang belum stabil.
         run: |
           ./gradlew :shadowhook:assembleRelease \
+            -Pandroid.extractNativeLibs=true \
             -PbuildToolsVersion="33.0.2" \
             -PcompileSdkVersion=33 \
             -PminSdkVersion=16 \
-            -PtargetSdkVersion=33
+            -PtargetSdkVersion=33 \
+            -Pandroid.cmakeVersion="3.22.1"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
