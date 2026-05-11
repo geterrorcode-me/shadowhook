@@ -18,41 +18,43 @@ jobs:
 
       - name: Install Android NDK and CMake
         run: |
-          # Paksa install NDK 25 dan CMake 3.22 yang stabil
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.1.8937393" "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393" >> $GITHUB_ENV
 
-      - name: Patch Project (ShadowHook Overwrite)
+      - name: Patch Project (Self-Sufficient Module)
         run: |
-          # 1. Timpa build.gradle root agar tidak mencari plugin 8.10.1 yang error di log Anda
+          # 1. Timpa build.gradle root dengan properti yang dibutuhkan modul
           cat <<EOF > build.gradle
           buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.2.2'
-              }
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:8.2.2' }
+          }
+          // Definisi variabel global yang dicari oleh modul shadowhook
+          ext {
+              compileSdkVersion = 34
+              minSdkVersion = 21
+              targetSdkVersion = 34
+              ndkVersion = "25.1.8937393"
           }
           allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+              repositories { google(); mavenCentral() }
           }
           EOF
 
-          # 2. Pastikan settings.gradle hanya fokus pada modul shadowhook
+          # 2. Modifikasi settings.gradle
           echo "include ':shadowhook'" > settings.gradle
 
-          # 3. Patch ndkVersion di dalam modul agar sinkron dengan NDK yang kita install
+          # 3. Patch build.gradle di dalam folder shadowhook agar tidak mencari variabel di tempat lain
+          # Kita paksa agar ia menggunakan nilai SDK yang stabil
+          find shadowhook -name "build.gradle" -exec sed -i 's/rootProject.ext.compileSdkVersion/34/g' {} +
+          find shadowhook -name "build.gradle" -exec sed -i 's/rootProject.ext.minSdkVersion/21/g' {} +
+          find shadowhook -name "build.gradle" -exec sed -i 's/rootProject.ext.targetSdkVersion/34/g' {} +
           find shadowhook -name "build.gradle" -exec sed -i 's/ndkVersion [^ ]*/ndkVersion "25.1.8937393"/g' {} +
           
-          # 4. Turunkan syarat versi CMake agar tidak mencari versi 4.0.3
+          # 4. Patch CMakeLists: Turunkan syarat versi minimum
           find shadowhook -name "CMakeLists.txt" -exec sed -i 's/cmake_minimum_required(VERSION [0-9.]*)/cmake_minimum_required(VERSION 3.10.2)/g' {} +
-
-          # 5. Lock jalur SDK/NDK/CMake agar Gradle tidak bingung
+          
+          # 5. Lock jalur SDK/NDK/CMake
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "ndk.dir=$ANDROID_HOME/ndk/25.1.8937393" >> local.properties
           echo "cmake.dir=$ANDROID_HOME/cmake/3.22.1" >> local.properties
@@ -61,7 +63,6 @@ jobs:
 
       - name: Build ShadowHook Library
         run: |
-          # Jalankan assembleRelease khusus untuk modul shadowhook
           ./gradlew :shadowhook:assembleRelease \
             -Pandroid.ndkVersion=25.1.8937393 \
             -Dorg.gradle.project.android.externalNativeBuild.cmake.version=3.22.1 \
@@ -71,11 +72,7 @@ jobs:
         run: |
           mkdir -p final_libs/arm64-v8a
           mkdir -p final_libs/include
-          
-          # Ambil .so untuk arsitektur 64-bit
           find shadowhook/build/intermediates/cmake/release -name "libshadowhook.so" | grep "arm64-v8a" | xargs -I{} cp {} final_libs/arm64-v8a/
-          
-          # Ambil header file shadowhook.h
           find shadowhook/src/main/cpp -name "shadowhook.h" -exec cp {} final_libs/include/ \;
 
       - name: Upload Binaries
