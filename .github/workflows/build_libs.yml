@@ -3,8 +3,6 @@ name: Build Shadowhook
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -24,34 +22,34 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Install Android SDK & NDK
-        # Kita menginstal CMake dan NDK yang dibutuhkan
+      - name: Install Android Components
         run: |
+          # Install CMake 3.22.1 (Versi stabil yang didukung Android)
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            "ndk;25.2.9519653" \
             "cmake;3.22.1" \
-            "build-tools;33.0.2" \
-            "platforms;android-33"
+            "ndk;25.2.9519653"
+
+      - name: Fix CMake Version in Gradle Files
+        # Langkah krusial: Mencari string '4.0.3' dan menggantinya ke '3.22.1' 
+        # di semua file build.gradle agar tidak terjadi error CXX1300.
+        run: |
+          find . -name "build.gradle" -exec sed -i 's/"4.0.3"/"3.22.1"/g' {} +
+          find . -name "build.gradle" -exec sed -i "s/'4.0.3'/'3.22.1'/g" {} +
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build with Gradle
-        # Catatan: Kita memaksa Gradle menggunakan CMake 3.22.1 
-        # karena 4.0.3 kemungkinan besar adalah typo di build script atau versi yang belum stabil.
+      - name: Build Shadowhook
         run: |
           ./gradlew :shadowhook:assembleRelease \
-            -Pandroid.extractNativeLibs=true \
             -PbuildToolsVersion="33.0.2" \
             -PcompileSdkVersion=33 \
             -PminSdkVersion=16 \
             -PtargetSdkVersion=33 \
             -Pandroid.cmakeVersion="3.22.1"
 
-      - name: Upload Artifacts
+      - name: Upload SO Libraries
         uses: actions/upload-artifact@v4
         with:
           name: libshadowhook-so
-          path: |
-            **/build/intermediates/cmake/release/obj/**/*.so
-            **/build/outputs/aar/*.aar
+          path: "**/build/intermediates/cmake/release/obj/**/*.so"
