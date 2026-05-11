@@ -1,83 +1,54 @@
-name: Build ShadowHook Binaries
+name: Build Shadowhook
 
 on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive # Penting jika shadowhook menggunakan submodule
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: 'gradle'
 
-      - name: Install Android NDK and CMake
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Langkah ini untuk memastikan NDK tersedia karena Shadowhook adalah library C/C++
+      - name: Install NDK
         run: |
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.1.8937393" "cmake;3.22.1"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393" >> $GITHUB_ENV
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
 
-      - name: Patch Project (Self-Sufficient Module)
-        run: |
-          # 1. Timpa build.gradle root dengan properti yang dibutuhkan modul
-          cat <<EOF > build.gradle
-          buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies { classpath 'com.android.tools.build:gradle:8.2.2' }
-          }
-          // Definisi variabel global yang dicari oleh modul shadowhook
-          ext {
-              compileSdkVersion = 34
-              minSdkVersion = 21
-              targetSdkVersion = 34
-              ndkVersion = "25.1.8937393"
-          }
-          allprojects {
-              repositories { google(); mavenCentral() }
-          }
-          EOF
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-          # 2. Modifikasi settings.gradle
-          echo "include ':shadowhook'" > settings.gradle
-
-          # 3. Patch build.gradle di dalam folder shadowhook agar tidak mencari variabel di tempat lain
-          # Kita paksa agar ia menggunakan nilai SDK yang stabil
-          find shadowhook -name "build.gradle" -exec sed -i 's/rootProject.ext.compileSdkVersion/34/g' {} +
-          find shadowhook -name "build.gradle" -exec sed -i 's/rootProject.ext.minSdkVersion/21/g' {} +
-          find shadowhook -name "build.gradle" -exec sed -i 's/rootProject.ext.targetSdkVersion/34/g' {} +
-          find shadowhook -name "build.gradle" -exec sed -i 's/ndkVersion [^ ]*/ndkVersion "25.1.8937393"/g' {} +
-          
-          # 4. Patch CMakeLists: Turunkan syarat versi minimum
-          find shadowhook -name "CMakeLists.txt" -exec sed -i 's/cmake_minimum_required(VERSION [0-9.]*)/cmake_minimum_required(VERSION 3.10.2)/g' {} +
-          
-          # 5. Lock jalur SDK/NDK/CMake
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "ndk.dir=$ANDROID_HOME/ndk/25.1.8937393" >> local.properties
-          echo "cmake.dir=$ANDROID_HOME/cmake/3.22.1" >> local.properties
-          
-          chmod +x gradlew
-
-      - name: Build ShadowHook Library
+      - name: Build with Gradle
+        # Kita menyuntikkan properti yang hilang melalui flag -P
+        # Sesuaikan versi di bawah ini dengan kebutuhan proyek Anda
         run: |
           ./gradlew :shadowhook:assembleRelease \
-            -Pandroid.ndkVersion=25.1.8937393 \
-            -Dorg.gradle.project.android.externalNativeBuild.cmake.version=3.22.1 \
-            --no-daemon --stacktrace
+            -PbuildToolsVersion="33.0.2" \
+            -PcompileSdkVersion=33 \
+            -PminSdkVersion=16 \
+            -PtargetSdkVersion=33
 
-      - name: Organize Artifacts
-        run: |
-          mkdir -p final_libs/arm64-v8a
-          mkdir -p final_libs/include
-          find shadowhook/build/intermediates/cmake/release -name "libshadowhook.so" | grep "arm64-v8a" | xargs -I{} cp {} final_libs/arm64-v8a/
-          find shadowhook/src/main/cpp -name "shadowhook.h" -exec cp {} final_libs/include/ \;
-
-      - name: Upload Binaries
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: shadowhook-binaries
-          path: final_libs/
-          retention-days: 7
+          name: libshadowhook-so
+          path: |
+            **/build/intermediates/cmake/release/obj/**/*.so
+            **/build/outputs/aar/*.aar
